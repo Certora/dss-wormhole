@@ -136,17 +136,23 @@ contract WormholeOracleAuth {
      * Each signature is {bytes32 r}{bytes32 s}{uint8 v}
      * @param threshold_ The minimum number of valid signatures required for the method to return true
      */
-    function isValid(bytes32 signHash, bytes memory signatures, uint threshold_) public view returns (bool valid) {
+    function isValid(bytes32 signHash, bytes calldata signatures, uint threshold_) public view returns (bool valid) {
         uint256 count = signatures.length / 65;
         require(count >= threshold_, "WormholeOracleAuth/not-enough-sig");
+
+        uint256 len = signatures.length;
+        uint256 base;
+        assembly {
+            base := add(signatures.offset, 0x20)
+        }
 
         uint8 v;
         bytes32 r;
         bytes32 s;
         uint256 numValid;
         address lastSigner;
-        for (uint256 i; i < count;) {
-            (v,r,s) = splitSignature(signatures, i);
+        for (uint256 i; i < len;) {
+            (v,r,s) = splitSignature(base, i);
             address recovered = ecrecover(signHash, v, r, s);
             require(recovered > lastSigner, "WormholeOracleAuth/bad-sig-order"); // make sure signers are different
             lastSigner = recovered;
@@ -156,7 +162,7 @@ contract WormholeOracleAuth {
                     return true;
                 }
             }
-            unchecked { i++; }
+            unchecked { i+=65; }
         }
     }
 
@@ -191,20 +197,18 @@ contract WormholeOracleAuth {
         signHash = getSignHash(wormholeGUID);
     }
 
+    
+
     /**
      * @notice Parses the signatures and extract (r, s, v) for a signature at a given index.
      * @param signatures concatenated signatures. Each signature is {bytes32 r}{bytes32 s}{uint8 v}
      * @param index which signature to read (0, 1, 2, ...)
      */
-    function splitSignature(bytes memory signatures, uint256 index) internal pure returns (uint8 v, bytes32 r, bytes32 s) {
-        // we jump 32 (0x20) as the first slot of bytes contains the length
-        // we jump 65 (0x41) per signature
-        // for v we load 32 bytes ending with v (the first 31 come from s) then apply a mask
-        // solhint-disable-next-line no-inline-assembly
+     function splitSignature(uint signatures, uint256 index) internal pure returns (uint8 v, bytes32 r, bytes32 s) {
         assembly {
-            r := mload(add(signatures, add(0x20, mul(0x41, index))))
-            s := mload(add(signatures, add(0x40, mul(0x41, index))))
-            v := and(mload(add(signatures, add(0x41, mul(0x41, index)))), 0xff)
+            r := mload(add(signatures, index))
+            s := mload(add(signatures, add(index, 0x20)))
+            v := and(mload(add(signatures, add(index, 0x21))), 0xff)
         }
         require(v == 27 || v == 28, "WormholeOracleAuth/bad-v");
     }
